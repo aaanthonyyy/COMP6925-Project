@@ -21,10 +21,11 @@ W = [
 ]
 
 # A[j, k] = additional staff needed for shift j on day k
+# Since we are not given the additional staff needed, we use a large value (100) as a placeholder to relax the constraint
 A = fill(100, 3, 7)
 
-days = 1:7
 shifts = 1:3
+days = 1:7
 
 
 function solve_for_n_employees(N)
@@ -116,7 +117,6 @@ p = plot(
     linestyle=:solid,
     legend=:topleft,
     framestyle=:box,
-    grid=false,
     xticks=70:2:90,
     ylim=(78, 91),
     xlabel="Number of Employees (N)",
@@ -163,6 +163,21 @@ display(p)
 savefig("816008250_q1a_results.png")
 
 
+#= (b) Check evidence for employee 1 and employee 8 =#
+optimal_model = solve_for_n_employees(72)
+x = optimal_model[:x]
+# both have sat/sun off
+println("--- Evidence Check ---")
+for k in 1:7
+    s1 = "OFF"
+    s8 = "OFF"
+    for j in 1:3
+        if value(x[1, j, k]) > 0.5 s1 = "Shift $j" end
+        if value(x[8, j, k]) > 0.5 s8 = "Shift $j" end
+    end
+    println("Day $k: Emp 1 is $s1 | Emp 8 is $s8")
+end
+println("-"^70)
 
 
 
@@ -172,7 +187,7 @@ Solve the problem again and compare the new assignments and figures.
 
 # rn = 0.7/5 * S
 rn = 0.7 / 5
-rO_old = 1.5 * rn
+rO_old = 1.75 * rn
 rO_new = 2.5 * rn
 
 old_computed = []
@@ -230,7 +245,7 @@ p_c = plot(
 
 # Old Lower Bound
 plot!(N_range, old_lb,
-    label="Old Lower Bound", color=:gray,
+    label="Baseline Lower Bound (\$1.75 r_n\$)", color=:gray,
     linewidth=1.0, linestyle=:dash
 )
 
@@ -243,7 +258,7 @@ plot!(N_range, old_computed,
 
 # New Lower Bound
 plot!(N_range, new_lb,
-    label="New Lower Bound", color=:black,
+    label="New Lower Bound (\$2.5 r_n\$)", color=:black,
     linewidth=1.0, linestyle=:solid
 )
 
@@ -259,7 +274,7 @@ scatter!(
     color=:gray50,
     markersize=5,
     markerstrokewidth=0,
-    label="Old Optimal (N=$(N_range[idx_old]))"
+    label=""
 )
 scatter!(
     [N_range[idx_new]], [min_new],
@@ -284,7 +299,7 @@ function print_detailed_results(N_optimal)
     model = solve_for_n_employees(N_optimal)
 
     # 1. TABLE 2 REPLICATION (Aggregate)
-    println("\n[TABLE 2 REPLICATION] Aggregate Schedule vs Workload")
+    println("\n[TABLE 2 REPLICATION] Aggregate Schedule (Workload)")
     println("-"^70)
     @printf("%-10s %-8s %-8s %-8s %-8s %-8s %-8s %-8s\n", "Shift", "Sat", "Sun", "Mon", "Tue", "Wed", "Thu", "Fri")
     println("-"^70)
@@ -292,15 +307,11 @@ function print_detailed_results(N_optimal)
     shift_names = ["Morning", "Evening", "Night"]
 
     for j in 1:3
-        # Start row with Shift Name
         print(rpad(shift_names[j], 10))
-
         for k in 1:7
-            # Sum all employees for this shift/day
-            assigned = value(sum(model[:x][:, j, k]))
+            x = model[:x]
+            assigned = sum(value.(x[:, j, k]))
             required = W[j, k]
-
-            # Format: Assigned (Required)
             s = "$(Int(assigned)) ($required)"
             print(rpad(s, 9))
         end
@@ -347,3 +358,4 @@ println("    Optimal Staff (N): $optimal_N_new")
 println("    Minimum Cost: $(round(optimal_N_new, digits=3))")
 println("="^70)
 print_detailed_results(optimal_N_new)
+
