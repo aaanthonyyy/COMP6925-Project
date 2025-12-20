@@ -400,43 +400,6 @@ def _(mo):
 
 
 @app.cell
-def _(cost_df, fit_best_arima, pd, time_series_data):
-    # %%
-    # Function to predict next 4 quarters using your optimized ARIMA
-    def predict_next_4_quarters(series):
-        model_fit = fit_best_arima(series)
-        forecast = model_fit.forecast(steps=4)
-
-        return forecast.values
-    # 1. Generate forecasts for all lenses
-    future_forecasts = {}
-
-    print("Forecasting next 4 quarters for inventory planning...")
-    for cols in time_series_data.columns:
-        arima_forecasts = predict_next_4_quarters(time_series_data[cols])
-        future_forecasts[cols] = arima_forecasts
-
-    # 2. Create the Demand DataFrame (Rows=Quarters, Cols=Lenses)
-    demand_df = pd.DataFrame(future_forecasts)
-
-    # # Set a clean index for the 4 quarters (e.g., Q1, Q2, Q3, Q4)
-    demand_df.index = [f"Q{i+1}" for i in range(len(demand_df))]
-    demand_df.columns = demand_df.columns.str.strip()
-    demand_df.round(3)
-    # # 3. CRITICAL: Align Cost and Demand Data
-    # # We only want lenses that exist in BOTH forecasts and cost data
-    common_lenses = demand_df.columns.intersection(cost_df.index)
-    common_lenses
-
-    # demand_df = demand_df[common_lenses]
-    (cost_df_clean := cost_df.loc[common_lenses])
-
-    # print(f"\nAligned Data: {len(common_lenses)} lenses ready for optimization.")
-    # demand_df.head()
-    return
-
-
-@app.cell
 def _():
     import pulp
     from pulp import LpMaximize, LpProblem, LpVariable, lpSum
@@ -445,7 +408,7 @@ def _():
         quarters = demand.index
         lenses = demand.columns
         model = LpProblem(f"Optical_Inventory_{budget}", LpMaximize)
-    
+
         # Variables
         q = LpVariable.dicts("Order", (quarters, lenses), lowBound=0, cat='Integer')
         f = LpVariable.dicts("Fulfill", (quarters, lenses), lowBound=0, cat='Integer')
@@ -456,18 +419,18 @@ def _():
         for t in quarters:
             for k in lenses:
                 if k not in costs.index: continue
-            
+
                 D_tk = float(demand.loc[t, k])
                 Cc = float(costs.loc[k, 'direct_cost'])
                 Cm = float(costs.loc[k, 'middleman_cost'])
                 Ch = float(costs.loc[k, 'holding_cost'])
-            
+
                 rev = 0.10 * Cc * f[t][k]
                 penalty = Cm * (D_tk - f[t][k])
                 hold = Ch * s[t][k]
-            
+
                 objective_terms.append(rev - penalty - hold)
-    
+
         model += lpSum(objective_terms)
 
         # Constraints
@@ -475,49 +438,49 @@ def _():
             # Budget
             daily_spend = [q[t][k] * float(costs.loc[k, 'direct_cost']) for k in lenses]
             model += lpSum(daily_spend) <= budget
-        
+
             for k in lenses:
                 safe_k = str(k).replace(" ", "_").replace(",", "_").replace(".", "_")
                 D_tk = float(demand.loc[t, k])
                 prev = 0 if t_idx == 0 else s[quarters[t_idx-1]][k]
-            
+
                 model += s[t][k] == prev + q[t][k] - f[t][k], f"Bal_{t}_{safe_k}"
                 model += f[t][k] <= D_tk, f"MaxDem_{t}_{safe_k}"
                 model += f[t][k] <= prev + q[t][k], f"MaxStock_{t}_{safe_k}"
 
         model.solve(pulp.PULP_CBC_CMD(msg=0))
-    
+
         # --- 3. EXTRACT METRICS FOR TABLE II ---
         # We calculate these manually from the solver results
         total_direct_cost = 0  # "Budget Utilized"
         total_middleman_cost = 0
         total_middleman_units = 0
         total_holding_cost = 0
-    
+
         for t in quarters:
             for k in lenses:
                 if k not in costs.index: continue
-            
+
                 # Get values
                 q_val = q[t][k].varValue
                 f_val = f[t][k].varValue
                 s_val = s[t][k].varValue
                 D_val = float(demand.loc[t, k])
-            
+
                 # Costs
                 Cc = float(costs.loc[k, 'direct_cost'])
                 Cm = float(costs.loc[k, 'middleman_cost'])
                 Ch = float(costs.loc[k, 'holding_cost'])
-            
+
                 # Accumulate Metrics
                 total_direct_cost += q_val * Cc
-            
+
                 # Unfulfilled demand = Middleman usage
                 # Note: D_val - f_val might be 0.000001 due to floats, so we max(0, ...)
                 unfulfilled = max(0, D_val - f_val)
                 total_middleman_units += unfulfilled
                 total_middleman_cost += unfulfilled * Cm
-            
+
                 total_holding_cost += s_val * Ch
 
         # Total Cost defined in Table III as: Direct + Middleman + Holding
@@ -531,11 +494,11 @@ def _():
             "total_direct_cost": total_direct_cost,
             "status": pulp.LpStatus[model.status]
         }
-    return (optimize_inventory,)
+    return optimize_inventory, pulp
 
 
 @app.cell
-def _(cost_df, fit_best_arima, optimize_inventory, pd, time_series_data):
+def _(fit_best_arima, pd, time_series_data):
 
     cutoff_date = "2023-09-30"
     clean_history = time_series_data.loc[:cutoff_date]
@@ -560,21 +523,6 @@ def _(cost_df, fit_best_arima, optimize_inventory, pd, time_series_data):
 
 
     clean_ts_df.round(3)
-    # Verify the fix (Should be ~7.18 now, NOT 0)
-    # # print(f"New Forecast for 'prog, trans': {clean_ts_df['prog, trans'].values}")
-
-    # # --- STEP 3: RUN OPTIMIZATION WITH FIXED DEMAND ---
-    # # Now pass this new dataframe to your optimization function
-    # print("\nRunning Optimization with Fixed Demand...")
-
-    # # # Ensure strict integer handling function is defined (from previous step)
-    res_30k = optimize_inventory(clean_ts_df, cost_df, 30000)
-    res_50k = optimize_inventory(clean_ts_df, cost_df, 50000)
-
-    res_30k
-
-
-
     return (clean_ts_df,)
 
 
@@ -592,9 +540,174 @@ def _(clean_ts_df, cost_df, optimize_inventory, pd):
     return
 
 
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    # Attempt 2
+    """)
+    return
+
+
 @app.cell
-def _(clean_ts_df):
-    clean_ts_df.round(3)
+def _(pd, pulp):
+
+
+    def optimize_inventory_new(demand_df, cost_df, budget_per_quarter):
+        """
+        Optimizes lens inventory procurement.
+        Automatically handles demand_df whether it is (Products x Time) or (Time x Products).
+        """
+
+        # ---------------------------------------------------------
+        # 1. AUTO-FIX: Check Orientation and Transpose if needed
+        # ---------------------------------------------------------
+        # Check if the COLUMNS of demand match the INDEX of costs (Products)
+        # If they match, the dataframe is "sideways" (Time x Products)
+        common_cols = len(demand_df.columns.intersection(cost_df.index))
+        common_index = len(demand_df.index.intersection(cost_df.index))
+
+        # If columns match products better than the index does, we transpose.
+        if common_cols > common_index:
+            print("Note: Transposing demand_df to match (Products x Quarters) format...")
+            demand_df = demand_df.transpose()
+
+        # ---------------------------------------------------------
+        # 2. Setup Parameters
+        # ---------------------------------------------------------
+        # We create a map to handle Dates/Timestamps safely
+        # 'quarter_keys' will be strings (safe for Pulp variables)
+        # 'quarter_cols' will be the original objects (safe for DataFrame lookup)
+        quarter_cols = demand_df.columns.tolist()
+        quarter_keys = [str(q) for q in quarter_cols]
+        time_map = dict(zip(quarter_keys, quarter_cols))
+
+        products = demand_df.index.tolist()
+
+        # Filter to ensure we only use products that exist in BOTH tables
+        valid_products = [p for p in products if p in cost_df.index]
+        if len(valid_products) < len(products):
+            print(f"Warning: Dropped {len(products) - len(valid_products)} items not found in cost table.")
+        products = valid_products
+
+        profit_margin = 0.10
+        prob = pulp.LpProblem("Optical_Lens_Inventory_Optimization", pulp.LpMaximize)
+
+        # ---------------------------------------------------------
+        # 3. Define Variables
+        # ---------------------------------------------------------
+        # Use string keys for Pulp to avoid issues with Timestamps
+        keys = [(q, p) for q in quarter_keys for p in products]
+
+        q_vars = pulp.LpVariable.dicts("Order_Qty", keys, lowBound=0, cat='Integer')
+        f_vars = pulp.LpVariable.dicts("Fulfilled_Direct", keys, lowBound=0, cat='Integer')
+        s_vars = pulp.LpVariable.dicts("Stock_End", keys, lowBound=0, cat='Integer')
+
+        # ---------------------------------------------------------
+        # 4. Objective Function
+        # ---------------------------------------------------------
+        objective_terms = []
+
+        for t_str in quarter_keys:
+            # Retrieve the original column name (e.g., Timestamp) for lookup
+            t_original = time_map[t_str]
+
+            for k in products:
+                # Get Data
+                D_tk = demand_df.at[k, t_original]
+                C_c = cost_df.at[k, 'direct_cost']
+                C_m = cost_df.at[k, 'middleman_cost']
+                C_h = cost_df.at[k, 'holding_cost']
+
+                # Get Variables using the string key
+                f_tk = f_vars[(t_str, k)]
+                s_tk = s_vars[(t_str, k)]
+
+                # Profit Terms
+                direct_profit = profit_margin * C_c * f_tk
+                middleman_cost = C_m * (D_tk - f_tk)
+                holding_cost = C_h * s_tk
+
+                objective_terms.append(direct_profit - middleman_cost - holding_cost)
+
+        prob += pulp.lpSum(objective_terms), "Total_Profit"
+
+        # ---------------------------------------------------------
+        # 5. Constraints
+        # ---------------------------------------------------------
+        for t_idx, t_str in enumerate(quarter_keys):
+            t_original = time_map[t_str]
+
+            # Budget Constraint
+            quarterly_spend = [q_vars[(t_str, k)] * cost_df.at[k, 'direct_cost'] for k in products]
+            prob += pulp.lpSum(quarterly_spend) <= budget_per_quarter, f"Budget_{t_str}"
+
+            for k in products:
+                # Previous Inventory
+                if t_idx == 0:
+                    s_prev = 0
+                else:
+                    prev_q_str = quarter_keys[t_idx - 1]
+                    s_prev = s_vars[(prev_q_str, k)]
+
+                # Inventory Balance
+                prob += s_vars[(t_str, k)] == s_prev + q_vars[(t_str, k)] - f_vars[(t_str, k)], f"Inv_Bal_{t_str}_{k}"
+
+                # Fulfillment Constraints
+                D_tk = demand_df.at[k, t_original]
+                prob += f_vars[(t_str, k)] <= D_tk, f"Max_Demand_{t_str}_{k}"
+                prob += f_vars[(t_str, k)] <= s_prev + q_vars[(t_str, k)], f"Max_Stock_{t_str}_{k}"
+
+        # ---------------------------------------------------------
+        # 6. Solve & Return
+        # ---------------------------------------------------------
+        solver = pulp.PULP_CBC_CMD(msg=True, gapRel=0.05, timeLimit=60)
+        prob.solve(solver)
+
+        results = []
+        for t_str in quarter_keys:
+            t_original = time_map[t_str]
+            for k in products:
+                val_d = demand_df.at[k, t_original]
+                val_q = pulp.value(q_vars[(t_str, k)])
+                val_f = pulp.value(f_vars[(t_str, k)])
+                val_s = pulp.value(s_vars[(t_str, k)])
+                val_m = val_d - val_f
+
+                results.append({
+                    'Quarter': t_original,  # Return the original date object
+                    'Product': k,
+                    'Demand': val_d,
+                    'Direct_Order': val_q,
+                    'Fulfilled_Direct': val_f,
+                    'Middleman_Units': val_m,
+                    'End_Stock': val_s
+                })
+
+        return {
+            'status': pulp.LpStatus[prob.status],
+            'total_profit': pulp.value(prob.objective),
+            'results_df': pd.DataFrame(results)
+        }
+    return (optimize_inventory_new,)
+
+
+@app.cell
+def _(time_series_data):
+    demand_df = time_series_data.copy()
+    demand_df.head()
+    return (demand_df,)
+
+
+@app.cell
+def _(cost_df):
+    cost_df.head()
+    return
+
+
+@app.cell
+def _(cost_df, demand_df, optimize_inventory_new):
+    solution = optimize_inventory_new(demand_df, cost_df, 50000)
+    solution
     return
 
 
