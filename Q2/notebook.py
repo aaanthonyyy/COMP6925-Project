@@ -8,13 +8,13 @@
 
 import marimo
 
-__generated_with = "0.18.3"
+__generated_with = "0.18.4"
 app = marimo.App(width="medium")
 
 
 @app.cell
 def _():
-    import marimo as mo
+    # import marimo as mo
     import pandas as pd
     import numpy as np
     import warnings
@@ -30,7 +30,6 @@ def _():
         ValueWarning,
         mean_absolute_error,
         mean_squared_error,
-        mo,
         np,
         pd,
         pulp,
@@ -365,77 +364,64 @@ def _(mo):
 
 
 @app.cell
-def _(
-    lens_data,
-    pd,
-    rolling_arima_eval,
-    rolling_prophet_eval,
-    time_series_data,
-    tqdm,
-):
-    results = []
-    target_lenses = [
-        "prog, trans",
-        "sv, bb",
-        "sv, trans, bb",
-        "repair",
-        "sv, poly",
-        "sv, clear",
-    ]
-
-    # To match the demand from the paper, the last 18 quarters are used
-    timeseries_18 = (
-        time_series_data
-        .tail(18)
-        .copy()
-        .assign(lens_data, lambda x: x["lens_data"].str.strip().str.replace(r"\s*,\s*", ", ", regex=True))
-    )
-
-
-    lenses_to_process = [l for l in target_lenses if l in timeseries_18.columns]
-
-    # Single loop for both models
-    for col in tqdm(lenses_to_process, desc="Processing Lenses"):
-        series = timeseries_18[col]
-        total_demand = series.sum()
-
-        # Fit ARIMA model
-        arima_res = rolling_arima_eval(series)
-
-        # Fit Prophet
-        prophet_res = rolling_prophet_eval(series)
-
-        # Ref: Table I shows 'Difference' columns
-        diff_mae = prophet_res["MAE"] - arima_res["MAE"]
-        diff_rmse = prophet_res["RMSE"] - arima_res["RMSE"]
-
-        # Obtain results for Table 1.
-        results.append(
-            {
-                "Combination": col,
-                "Total Demand": total_demand,
-                # Prophet Cols
-                "Prophet MAE": prophet_res["MAE"],
-                "Prophet RMSE": prophet_res["RMSE"],
-                # ARIMA Cols
-                "ARIMA MAE": arima_res["MAE"],
-                "ARIMA RMSE": arima_res["RMSE"],
-                # Difference Cols
-                "Diff MAE": diff_mae,
-                "Diff RMSE": diff_rmse,
-            }
-        )
-
-    # Create final DataFrame
-    comparison_df = pd.DataFrame(results).round(3)
-    comparison_df = comparison_df.sort_values(by="Total Demand", ascending=False)
-
-    comparison_df.head()
-    return (timeseries_18,)
-
-
-@app.cell
 def _():
+    # results = []
+    # target_lenses = [
+    #     "prog, trans",
+    #     "sv, bb",
+    #     "sv, trans, bb",
+    #     "repair",
+    #     "sv, poly",
+    #     "sv, clear",
+    # ]
+
+    # # To match the demand from the paper, the last 18 quarters are used
+    # timeseries_18 = (
+    #     time_series_data
+    #     .tail(18)
+    #     .copy()
+    # )
+
+
+    # lenses_to_process = [l for l in target_lenses if l in timeseries_18.columns]
+
+    # # Single loop for both models
+    # for col in tqdm(lenses_to_process, desc="Processing Lenses"):
+    #     series = timeseries_18[col]
+    #     total_demand = series.sum()
+
+    #     # Fit ARIMA model
+    #     arima_res = rolling_arima_eval(series)
+
+    #     # Fit Prophet
+    #     prophet_res = rolling_prophet_eval(series)
+
+    #     # Ref: Table I shows 'Difference' columns
+    #     diff_mae = prophet_res["MAE"] - arima_res["MAE"]
+    #     diff_rmse = prophet_res["RMSE"] - arima_res["RMSE"]
+
+    #     # Obtain results for Table 1.
+    #     results.append(
+    #         {
+    #             "Combination": col,
+    #             "Total Demand": total_demand,
+    #             # Prophet Cols
+    #             "Prophet MAE": prophet_res["MAE"],
+    #             "Prophet RMSE": prophet_res["RMSE"],
+    #             # ARIMA Cols
+    #             "ARIMA MAE": arima_res["MAE"],
+    #             "ARIMA RMSE": arima_res["RMSE"],
+    #             # Difference Cols
+    #             "Diff MAE": diff_mae,
+    #             "Diff RMSE": diff_rmse,
+    #         }
+    #     )
+
+    # # Create final DataFrame
+    # comparison_df = pd.DataFrame(results).round(3)
+    # comparison_df = comparison_df.sort_values(by="Total Demand", ascending=False)
+
+    # comparison_df
     return
 
 
@@ -449,7 +435,7 @@ def _(mo):
 
 @app.cell
 def _(fit_best_arima, pd, predict_prophet_next):
-    def generate_forecast_scenario(history_df, steps=4, method="arima"):
+    def generate_forecast_scenario(history_df, steps=4, method="arima", custom_func=None):
         """
         Generates a full inventory scenario (History + Forecast).
         Uses helper functions for model-specific prediction logic.
@@ -474,6 +460,14 @@ def _(fit_best_arima, pd, predict_prophet_next):
             elif method == "prophet":
                 # Use Prophet helper (Refactored call)
                 forecast_values = predict_prophet_next(series, steps=steps)
+
+            elif method == "sarima" and custom_func:
+                # use SARIMA grid search helper
+                model = custom_func(series)
+                forecast_values = model.forecast(steps=steps).values
+
+            else:
+                raise ValueError(f"Method {method} not supported or custom_func missing.")
 
             future_vals[col] = forecast_values
 
@@ -580,9 +574,9 @@ def _(pd, pulp):
                 f_tk = f_vars[(t_str, k)]
                 s_tk = s_vars[(t_str, k)]
                 m_tk = m_vars[(t_str, k)]
-            
+
                 prob += m_tk >= D_tk - f_tk
-            
+
                 # Profit Terms
                 direct_profit = profit_margin * C_c * f_tk
                 middleman_cost = C_m * m_tk 
@@ -810,11 +804,6 @@ def _(
     return arima_forecast, df_arima_results
 
 
-@app.cell
-def _():
-    return
-
-
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
@@ -825,7 +814,7 @@ def _(mo):
 
 
 @app.cell
-def _(ARIMA, mean_absolute_error, mean_squared_error, np):
+def _(ARIMA):
     def fit_best_sarima(series):
         """
         Grid searches for the best SARIMA model based on AIC.
@@ -835,22 +824,35 @@ def _(ARIMA, mean_absolute_error, mean_squared_error, np):
         best_model = None
 
         # Simplified Grid: (p,d,q) x (P,D,Q,s)
-        # We keep this small to prevent long runtimes
-        orders = [(0,1,1), (1,1,1), (1,0,0)]
+        orders = [
+            (0, 0, 0),
+            (1, 0, 0),
+            (0, 1, 0),
+            (0, 0, 1),
+            (1, 1, 0),
+            (1, 0, 1),
+            (0, 1, 1),
+            (1, 1, 1),
+        ]
         seasonal_orders = [
-            (0,1,1,4),  # Classic seasonal moving average
-            (1,1,0,4),  # Seasonal autoregressive
-            (0,1,0,4)   # Pure seasonal differencing
+            (0, 1, 1, 4),  # Classic seasonal moving average
+            (1, 1, 0, 4),  # Seasonal autoregressive
+            (0, 1, 0, 4),  # Pure seasonal differencing
         ]
 
         for order in orders:
             for seasonal_order in seasonal_orders:
                 try:
                     # Enforce stationarity/invertibility to avoid bad models
-                    model = ARIMA(series, order=order, seasonal_order=seasonal_order, 
-                                  enforce_stationarity=False, enforce_invertibility=False)
+                    model = ARIMA(
+                        series,
+                        order=order,
+                        seasonal_order=seasonal_order,
+                        enforce_stationarity=False,
+                        enforce_invertibility=False,
+                    )
                     results = model.fit()
-                
+
                     if results.aic < best_aic:
                         best_aic = results.aic
                         best_model = results
@@ -859,116 +861,135 @@ def _(ARIMA, mean_absolute_error, mean_squared_error, np):
 
         # Fallback if grid search fails completely
         if best_model is None:
-            return ARIMA(series, order=(0,1,0), seasonal_order=(0,0,0,4)).fit()
-        
+            return ARIMA(
+                series, order=(0, 0, 0), seasonal_order=(0, 0, 0, 4)
+            ).fit()
+
         return best_model
-
-    def rolling_sarima_eval(series, min_train=8):
-        """
-        Performs rolling origin evaluation for SARIMA.
-        """
-        actuals = []
-        forecasts = []
-
-        for i in range(min_train, len(series)):
-            train = series.iloc[:i]
-            actual = series.iloc[i]
-
-            # Fit & Forecast
-            model = fit_best_sarima(train)
-            pred_val = model.forecast(steps=1).iloc[0]
-        
-            # Clip negative predictions (Sales can't be negative)
-            pred_val = max(0, pred_val)
-
-            forecasts.append(pred_val)
-            actuals.append(actual)
-
-        return {
-            'MAE': mean_absolute_error(actuals, forecasts),
-            'RMSE': np.sqrt(mean_squared_error(actuals, forecasts))
-        }
-    return (rolling_sarima_eval,)
+    return (fit_best_sarima,)
 
 
-@app.cell(disabled=True)
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ### Table II. Forecast Accuracy Comparison for Selected Product Combinations
+    (Prophet, ARIMA, SARIMA)
+    """)
+    return
+
+
+@app.cell
 def _(
     pd,
     rolling_arima_eval,
     rolling_prophet_eval,
     rolling_sarima_eval,
     time_series_data,
+    tqdm,
 ):
-    def _():
-        from tqdm import tqdm
+    results = []
+    target_lenses = [
+        "prog, trans",
+        "sv, bb",
+        "sv, trans, bb",
+        "repair",
+        "sv, poly",
+        "sv, clear",
+    ]
 
-        results = []
-
-        # To match the demand from the paper, the last 18 quarters are used
-        timeseries_18 = time_series_data.tail(18).copy()
-
-        # Single loop for ALL models
-        for col in tqdm(timeseries_18.columns, desc="Processing Lenses"):
-            series = timeseries_18[col]
-            total_demand = series.sum()
-
-            # 1. Fit ARIMA
-            arima_res = rolling_arima_eval(series)
-
-            # 2. Fit Prophet
-            prophet_res = rolling_prophet_eval(series)
-        
-            # 3. Fit SARIMA (New)
-            # (Ensure rolling_sarima_eval function is defined from previous step)
-            sarima_res = rolling_sarima_eval(series)
-
-            # --- Calculate Comparisons ---
-        
-            # Prophet vs ARIMA (Table I style: Negative means Prophet is better)
-            diff_mae_prophet = prophet_res["MAE"] - arima_res["MAE"]
-            diff_rmse_prophet = prophet_res["RMSE"] - arima_res["RMSE"]
-        
-            # SARIMA vs ARIMA (Positive means SARIMA is better/lower error)
-            # We calculate how much error SARIMA *reduced* compared to ARIMA
-            impv_mae_sarima = arima_res["MAE"] - sarima_res["MAE"]
-
-            # Store Results
-            results.append({
-                "Combination": col,
-                "Total Demand": total_demand,
-
-                # Prophet Metrics
-                "Prophet MAE": prophet_res["MAE"],
-                "Prophet RMSE": prophet_res["RMSE"],
-
-                # ARIMA Metrics
-                "ARIMA MAE": arima_res["MAE"],
-                "ARIMA RMSE": arima_res["RMSE"],
-            
-                # SARIMA Metrics (New)
-                "SARIMA MAE": sarima_res["MAE"],
-                "SARIMA RMSE": sarima_res["RMSE"],
-
-                # Comparisons
-                "Diff MAE (Prophet-ARIMA)": diff_mae_prophet,
-                "Improvement (SARIMA vs ARIMA)": impv_mae_sarima
-            })
-
-        # Create final DataFrame
-        comparison_df = pd.DataFrame(results).round(3)
-        comparison_df = comparison_df.sort_values(by="Total Demand", ascending=False)
-
-        # Reorder columns for a logical report view
-        cols = [
-            "Combination", "Total Demand", 
-            "ARIMA MAE", "Prophet MAE", "SARIMA MAE", 
-            "Diff MAE (Prophet-ARIMA)", "Improvement (SARIMA vs ARIMA)"
-        ]
-        comparison_df = comparison_df[cols]
-        return comparison_df.head(10)
+    # To match the demand from the paper, the last 18 quarters are used
+    timeseries_18 = (
+        time_series_data
+        .tail(18)
+        .copy()
+    )
 
 
-    _()
+    lenses_to_process = [l for l in target_lenses if l in time_series_data.columns]
+
+    # Single loop for both models
+    for col in tqdm(lenses_to_process, desc="Processing Lenses"):
+        series = timeseries_18[col]
+        total_demand = series.sum()
+
+        # 1. Fit ARIMA
+        arima_res = rolling_arima_eval(series)
+
+        # 2. Fit Prophet
+        prophet_res = rolling_prophet_eval(series)
+
+        # 3. Fit SARIMA (New)
+        # (Ensure rolling_sarima_eval function is defined from previous step)
+        sarima_res = rolling_sarima_eval(series)
+
+        # --- Calculate Comparisons ---
+
+        # Prophet vs ARIMA (Table I style: Negative means Prophet is better)
+        diff_mae_prophet = prophet_res["MAE"] - arima_res["MAE"]
+        diff_rmse_prophet = prophet_res["RMSE"] - arima_res["RMSE"]
+
+        # SARIMA vs ARIMA (Positive means SARIMA is better/lower error)
+        # We calculate how much error SARIMA *reduced* compared to ARIMA
+        impv_mae_sarima = arima_res["MAE"] - sarima_res["MAE"]
+
+        # Store Results
+        results.append({
+            "Combination": col,
+            "Total Demand": total_demand,
+
+            # Prophet Metrics
+            "Prophet MAE": prophet_res["MAE"],
+            "Prophet RMSE": prophet_res["RMSE"],
+
+            # ARIMA Metrics
+            "ARIMA MAE": arima_res["MAE"],
+            "ARIMA RMSE": arima_res["RMSE"],
+
+            # SARIMA Metrics (New)
+            "SARIMA MAE": sarima_res["MAE"],
+            "SARIMA RMSE": sarima_res["RMSE"],
+
+            # Comparisons
+            "Diff MAE (Prophet-ARIMA)": diff_mae_prophet,
+            "Improvement (SARIMA vs ARIMA)": impv_mae_sarima
+        })
+
+    # Create final DataFrame
+    comparison_df = pd.DataFrame(results).round(3)
+    comparison_df = comparison_df.sort_values(by="Total Demand", ascending=False)
+
+    # Reorder columns for a logical report view
+    cols = [
+        "Combination", "Total Demand", 
+        "ARIMA MAE", "Prophet MAE", "SARIMA MAE", 
+        "Diff MAE (Prophet-ARIMA)", "Improvement (SARIMA vs ARIMA)"
+    ]
+    comparison_df = comparison_df[cols]
+    comparison_df
+    return (timeseries_18,)
+
+
+@app.cell
+def _(
+    arima_forecast,
+    budgets,
+    cost_df,
+    evaluate_budget_scenarios,
+    fit_best_sarima,
+    generate_forecast_scenario,
+    pd,
+    time_series_data,
+):
+    sarima_forecast = generate_forecast_scenario(
+        time_series_data, steps=12, method="sarima", custom_func=fit_best_sarima
+    )
+
+    # --- SARIMA EVALUATION ---
+    print("--- SARIMA RESULTS ---")
+    df_sarima_results = evaluate_budget_scenarios(
+        pd.concat([time_series_data.tail(18), arima_forecast]), cost_df, budgets
+    )
+    df_sarima_results
     return
 
 
@@ -990,7 +1011,6 @@ def _(
     pd,
     timeseries_18,
 ):
-    # To address Part (c), we need to implement the "PrescriptionDistributor" logic that the paper mentions but which wasn't part of the aggregate Linear Programming model.The ConceptYour LP model decides "How many lenses to buy" (e.g., 100 units of Progressive Transitions).The PrescriptionDistributor decides "Which powers to buy" (e.g., 15 units of +1.00, 10 units of +1.25, etc.).If your distribution assumption is wrong (e.g., you assume a wide spread of powers, but customers mostly want a narrow range), you will have mismatches:Stockouts: You run out of the popular powers (Middleman Cost increases).Overstock: You are left holding unpopular powers (Holding Cost increases).The ImplementationWe will build a simulation to measure this impact.Define Distributions: Generate weights for Diopters (e.g., -6.00 to +6.00) using the two Normal Distributions: $N(0, 1.25)$ vs $N(0, 0.625)$.Simulate Fulfillment:Take the Optimal Order Quantities from your Part (a) results.Distribute the Stock using the Old distribution (Planning View).Distribute the Demand using the New distribution (Actual Reality).Calculate the real costs based on the mismatch.Python CodeCopy this into a new cell. This defines the distributor and runs the comparison.Pythonimport numpy as np
     import scipy.stats as stats
     import matplotlib.pyplot as plt
 
@@ -1000,76 +1020,76 @@ def _(
         """
         # Generate discrete power steps (Diopters)
         powers = np.arange(start, end + step, step)
-    
+
         # Calculate PDF (Probability Density Function)
         # We treat the discrete step as the center of a bin
         probs = stats.norm.pdf(powers, loc=mean, scale=sigma)
-    
+
         # Normalize so they sum to 1 (100% of inventory)
         probs = probs / probs.sum()
-    
+
         return pd.Series(probs, index=powers)
 
     def simulate_prescription_impact(aggregate_results, cost_df, sigma_plan, sigma_actual):
         """
         Simulates the financial impact of distributing aggregate orders into specific powers.
-    
+
         aggregate_results: The DataFrame output from your LP model
         sigma_plan: The sigma used to buy inventory (Assumption)
         sigma_actual: The sigma of actual customer demand (Reality)
         """
-    
+
         # 1. Get Weights
         weights_plan = get_prescription_weights(sigma_plan)
         weights_actual = get_prescription_weights(sigma_actual)
-    
+
         total_real_profit = 0
         total_mismatch_cost = 0
-    
+
         # 2. Iterate through every aggregate decision
         # We assume 'aggregate_results' has columns: ['Product', 'Direct_Order', 'Demand']
         for _, row in aggregate_results.iterrows():
             prod = row['Product']
             if prod not in cost_df.index: continue
-            
+
             qty_ordered = row['Direct_Order']
             qty_demand_total = row['Demand']
-        
+
             # Costs
             c_direct = cost_df.at[prod, 'direct_cost']
             c_middle = cost_df.at[prod, 'middleman_cost']
             c_holding = cost_df.at[prod, 'holding_cost']
             profit_margin = 0.10
-        
+
             # 3. Distribute to Bins (The "Micro" Simulation)
             # Inventory is bought based on the PLAN distribution
             stock_bins = (qty_ordered * weights_plan).round(0)
-        
+
             # Customers arrive based on the ACTUAL distribution
             demand_bins = (qty_demand_total * weights_actual).round(0)
-        
+
             # 4. Calculate Fulfillment per Bin
             # For each power (e.g. +1.00), we sell min(demand, stock)
             sales_bins = np.minimum(stock_bins, demand_bins)
-        
+
             # Unfulfilled demand goes to Middleman
             middleman_bins = demand_bins - sales_bins
-        
+
             # Unsold stock incurs Holding Cost
             leftover_bins = stock_bins - sales_bins
-        
+
             # 5. Calculate Financials
             revenue = (sales_bins * c_direct * profit_margin).sum()
             cost_middleman = (middleman_bins * c_middle).sum()
             cost_holding = (leftover_bins * c_holding).sum()
-        
+
             # Total Profit for this product
             # Note: We paid for direct stock upfront! (qty_ordered * c_direct) is sunk cost?
             # The paper calculates profit as: Margin*Sold - MiddlemanCost - HoldingCost
             # It assumes the "Cost of Goods Sold" is covered, but we must subtract ordering cost?
             # Following paper formula: Z = (Margin * Cost * Sold) - (MiddlemanCost) - (HoldingCost)
             # Note: This formula assumes we only profit on what we sell.
-        
+
             item_profit = revenue - cost_middleman - cost_holding
             total_real_profit += item_profit
 
@@ -1123,7 +1143,6 @@ def _(
     plt.legend()
     plt.grid(True, alpha=0.3)
     plt.show()
-
     return
 
 
