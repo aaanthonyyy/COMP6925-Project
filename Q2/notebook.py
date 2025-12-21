@@ -14,7 +14,7 @@ app = marimo.App(width="medium")
 
 @app.cell
 def _():
-    # import marimo as mo
+    import marimo as mo
     import pandas as pd
     import numpy as np
     import warnings
