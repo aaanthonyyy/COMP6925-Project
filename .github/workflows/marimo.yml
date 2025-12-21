@@ -27,7 +27,7 @@ jobs:
           cd Q2
           # Export to a temporary folder named 'dist'
           # We use --mode run for a finished app experience
-          uv run marimo export html-wasm notebook.py -o dist --mode run
+          uv run marimo export html-wasm notebook.py -o dist --mode edit --show-code
 
       - name: 📦 Upload Pages Artifact
         uses: actions/upload-pages-artifact@v3
